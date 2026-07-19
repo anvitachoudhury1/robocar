@@ -23,9 +23,6 @@
 #include <Servo.h>
 
 // ---------- RLS-05 Digital Output Pins ----------
-//const int sensorPins[5] = {4, 5, 6, 7, 8}; // S0 (left) to S4 (right)
-
-
 const int sensorPins[5] = {4, 5, 6, 7, 8}; // S0 (left) to S4 (right)
 
 // ---------- Servo ----------
@@ -36,7 +33,8 @@ const int centerAngle = 90;
 const int maxSwing = 40; // servo moves centerAngle +/- maxSwing
 
 // Position weights: leftmost sensor = -2, center = 0, rightmost = +2
-const int weights[5] = {-2, -1, 0, 1, 2};
+// (Reversed from original so servo turns the correct physical direction)
+const int weights[5] = {2, 1, 0, -1, -2};
 
 int lastAngle = centerAngle;
 
