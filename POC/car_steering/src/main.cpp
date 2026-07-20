@@ -30,7 +30,7 @@ const int servoPin = 3;
 Servo myServo;
 
 const int centerAngle = 90;
-const int maxSwing = 40; // servo moves centerAngle +/- maxSwing
+const int maxSwing = 20; // servo moves centerAngle +/- maxSwing
 
 // Position weights: leftmost sensor = -2, center = 0, rightmost = +2
 // (Reversed from original so servo turns the correct physical direction)
@@ -83,5 +83,5 @@ void loop() {
   Serial.print("-> Angle: ");
   Serial.println(angle);
 
-  delay(50);
+  delay(500);
 }
