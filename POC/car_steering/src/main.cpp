@@ -1,152 +1,258 @@
 #include <Arduino.h>
 
-// =======================================================
-//                SENSOR PINS
-// =======================================================
-// S0(left)=4, S1=5, S2(center)=A1, S3=7, S4(right)=8
-
-const int sensorPins[5] = {4, 5, A1, 7, 8};
-
-// Position weights
+// =================================================
+// RLS-05 Sensor Pins
+// IR1 LEFT -> IR5 RIGHT
+// =================================================
+const byte sensorPins[5] = {4, 5, A1, 7, 8};
 const int weights[5] = {-2, -1, 0, 1, 2};
 
-// =======================================================
-//                MOTOR DRIVER (L298N)
-// =======================================================
+bool sensors[5];
 
-const int ENA = 6;
-const int IN1 = 11;
-const int IN2 = 12;
+// =================================================
+// L298N Motor Pins
+// =================================================
+const byte ENA = 6; // Left motor PWM
+const byte IN1 = 11;
+const byte IN2 = 12;
 
-const int ENB = A2; // Digital only
-const int IN3 = 13;
-const int IN4 = 10;
+const byte ENB = 3; // Right motor PWM
+const byte IN3 = 13;
+const byte IN4 = 10;
 
-// =======================================================
-//                   PID
-// =======================================================
+// =================================================
+// PID SETTINGS
+// =================================================
+float Kp = 22;
+float Ki = 0;
+float Kd = 10;
 
-float Kp = 18.0;
-float Ki = 0.0;
-float Kd = 10.0;
-
-float error = 0;
 float previousError = 0;
 float integral = 0;
-float derivative = 0;
-float correction = 0;
 
-// =======================================================
-//                MOTOR SPEED
-// =======================================================
+// =================================================
+// SPEED
+// =================================================
+int normalSpeed = 90;
+int slowSpeed = 60;
 
-int motorSpeed = 180;
-
-// =======================================================
-//          READ LINE POSITION
-// =======================================================
-
-float readLinePosition()
+// =================================================
+// Motor Control
+// =================================================
+void setMotor(int left, int right)
 {
-    int activeSensors = 0;
-    int weightedSum = 0;
+    left = constrain(left, -255, 255);
+    right = constrain(right, -255, 255);
+
+    // Left motor
+    if (left >= 0)
+    {
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+        analogWrite(ENA, left);
+    }
+    else
+    {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+        analogWrite(ENA, -left);
+    }
+
+    // Right motor
+    if (right >= 0)
+    {
+        digitalWrite(IN3, HIGH);
+        digitalWrite(IN4, LOW);
+        analogWrite(ENB, right);
+    }
+    else
+    {
+        digitalWrite(IN3, LOW);
+        digitalWrite(IN4, HIGH);
+        analogWrite(ENB, -right);
+    }
+}
+
+// =================================================
+// Read Sensors
+// =================================================
+void readSensors()
+{
+    for (int i = 0; i < 5; i++)
+    {
+        sensors[i] = (digitalRead(sensorPins[i]) == LOW);
+    }
+}
+
+// =================================================
+// Calculate Error
+// =================================================
+float getError()
+{
+    readSensors();
+
+    int sum = 0;
+    int count = 0;
 
     for (int i = 0; i < 5; i++)
     {
-        int sensorValue = digitalRead(sensorPins[i]);
-
-        // LOW = Black line
-        if (sensorValue == LOW)
+        if (sensors[i])
         {
-            weightedSum += weights[i];
-            activeSensors++;
+            sum += weights[i];
+            count++;
         }
     }
 
-    // Lost line
-    if (activeSensors == 0)
+    // Line lost
+    if (count == 0)
     {
-        return previousError;
+        integral = 0;
+
+        if (previousError < 0)
+            return -3;
+
+        if (previousError > 0)
+            return 3;
+
+        return 0;
     }
 
-    return (float)weightedSum / activeSensors;
+    return (float)sum / count;
 }
 
-// =======================================================
-//                 MOTOR CONTROL
-// =======================================================
-
-void moveForward(int speedValue)
+// =================================================
+// 90 Degree Left Turn
+// =================================================
+void turnLeft()
 {
-    // Left Motor
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
+    setMotor(-60, 120);
 
-    // Right Motor
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
+    while (true)
+    {
+        readSensors();
 
-    analogWrite(ENA, speedValue);
+        if (sensors[2])
+            break;
+    }
 
-    // A2 is not PWM
-    digitalWrite(ENB, HIGH);
+    delay(50);
 }
 
-// =======================================================
-//                PID CONTROLLER
-// =======================================================
-
-void lineFollowPID()
+// =================================================
+// 90 Degree Right Turn
+// =================================================
+void turnRight()
 {
-    error = readLinePosition();
+    setMotor(120, -60);
+
+    while (true)
+    {
+        readSensors();
+
+        if (sensors[2])
+            break;
+    }
+
+    delay(50);
+}
+
+// =================================================
+// Setup
+// =================================================
+void setup()
+{
+    Serial.begin(9600);
+
+    for (int i = 0; i < 5; i++)
+        pinMode(sensorPins[i], INPUT);
+
+    pinMode(ENA, OUTPUT);
+    pinMode(ENB, OUTPUT);
+
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+    pinMode(IN3, OUTPUT);
+    pinMode(IN4, OUTPUT);
+
+    Serial.println("Robot Ready");
+}
+
+// =================================================
+// Main Loop
+// =================================================
+void loop()
+{
+
+    float error = getError();
+
+    // ----------------------------
+    // Corner Detection
+    // ----------------------------
+
+    // Left corner
+    if (sensors[0] && sensors[1])
+    {
+        turnLeft();
+        return;
+    }
+
+    // Right corner
+    if (sensors[3] && sensors[4])
+    {
+        turnRight();
+        return;
+    }
+
+    // ----------------------------
+    // PID
+    // ----------------------------
 
     integral += error;
+    integral = constrain(integral, -20, 20);
 
-    derivative = error - previousError;
+    float derivative = error - previousError;
 
-    correction =
+    float correction =
         (Kp * error) +
         (Ki * integral) +
         (Kd * derivative);
 
     previousError = error;
 
-    Serial.print("Error: ");
-    Serial.print(error);
-}
-// =======================================================
-//                    SETUP
-// =======================================================
+    correction = constrain(correction, -70, 70);
 
-void setup()
-{
-    Serial.begin(115200);
+    int speed = normalSpeed;
 
+    if (abs(error) > 1.5)
+        speed = slowSpeed;
+
+    // IMPORTANT:
+    // Direction corrected
+    int leftMotor = speed - correction;
+    int rightMotor = speed + correction;
+
+    setMotor(leftMotor, rightMotor);
+
+    // ----------------------------
+    // Debug
+    // ----------------------------
     for (int i = 0; i < 5; i++)
     {
-        pinMode(sensorPins[i], INPUT);
+        Serial.print(sensors[i]);
+        Serial.print(" ");
     }
 
-    pinMode(ENA, OUTPUT);
-    pinMode(IN1, OUTPUT);
-    pinMode(IN2, OUTPUT);
+    Serial.print(" Error:");
+    Serial.print(error);
 
-    pinMode(ENB, OUTPUT);
-    pinMode(IN3, OUTPUT);
-    pinMode(IN4, OUTPUT);
+    Serial.print(" Corr:");
+    Serial.print(correction);
 
-    delay(1000);
-}
+    Serial.print(" L:");
+    Serial.print(leftMotor);
 
-// =======================================================
-//                     LOOP
-// =======================================================
+    Serial.print(" R:");
+    Serial.println(rightMotor);
 
-void loop()
-{
-    moveForward(motorSpeed);
-
-    lineFollowPID();
-
-    delay(5);
+    delay(15);
 }
