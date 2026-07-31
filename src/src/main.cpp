@@ -20,6 +20,8 @@
 #include "led_control.h"
 #include "heart_control.h"
 #include "door_control.h"
+#include "ir_sensor.h"
+
 void setup()
 {
   Serial.begin(9600);
@@ -33,6 +35,7 @@ void setup()
     ;
   }
 
+  irSensorInit();
   ledInit();
   heartInit();
   networkInit();
@@ -43,4 +46,10 @@ void loop()
 {
   networkUpdate(); // accept clients, detect disconnects, dispatch commands
   ledUpdate();     // advance non-blocking blink animation
+  irSensorReadAll();
+  // irSensorPrintValues();
+
+  String data = irSensorGetValuesAsString();
+  broadcastAll(data);
+  delay(15);
 }
