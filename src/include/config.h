@@ -3,7 +3,8 @@
 
 // ---------------- WiFi Access Point ----------------
 #define WIFI_SSID "AnvitaPrasiddha"
-#define WIFI_PASS "Crochets" // must be at least 8 characters
+#define WIFI_PASS "\
+" // must be at least 8 characters
 
 // ---------------- TCP Server ----------------
 #define TCP_PORT 23
@@ -13,9 +14,6 @@
 // ---------------- Pins ----------------
 // Onboard LED uses LED_BUILTIN (defined by the core).
 // Reserved for future modules:
-#define TRIG_PIN 9  // HC-SR04 trigger
-#define ECHO_PIN 10 // HC-SR04 echo
-// #define LDR_PIN A0  // LDR voltage divider junction
 
 // ---------------- Timing ----------------
 #define BLINK_INTERVAL_MS 200
@@ -36,5 +34,15 @@
 #define IR_A2_S3 3
 #define IR_A2_S4 4
 #define IR_A2_S5 5
+
+#define MOTOR_STBY 6  // standby (must be HIGH to enable driver)
+#define MOTOR_AIN1 7  // motor A direction pin 1
+#define MOTOR_AIN2 8  // motor A direction pin 2
+#define MOTOR_PWMA 10 // motor A speed (PWM)
+#define MOTOR_BIN1 12 // motor B direction pin 1
+#define MOTOR_BIN2 13 // motor B direction pin 2
+#define MOTOR_PWMB 11 // motor B speed (PWM)
+
+#define SERVO_PIN 9
 
 #endif // CONFIG_H

@@ -21,6 +21,8 @@
 #include "heart_control.h"
 #include "door_control.h"
 #include "ir_sensor.h"
+#include <motor.h>
+#include <servo_control.h>
 
 void setup()
 {
@@ -40,16 +42,14 @@ void setup()
   heartInit();
   networkInit();
   doorInit();
+  motorBegin();
+  servoInit();
 }
 
 void loop()
 {
   networkUpdate(); // accept clients, detect disconnects, dispatch commands
   ledUpdate();     // advance non-blocking blink animation
-  irSensorReadAll();
-  // irSensorPrintValues();
 
-  String data = irSensorGetValuesAsString();
-  broadcastAll(data);
   delay(15);
 }

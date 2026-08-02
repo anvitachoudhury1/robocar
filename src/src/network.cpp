@@ -60,9 +60,7 @@ static void acceptNewClients()
 
       clients[i].println("=====================================");
       clients[i].println(" Connected to Arduino UNO R4 WiFi");
-      clients[i].println(" Commands: led on | led off | status");
-      clients[i].println("           blink | who | exit");
-      clients[i].println("=====================================");
+      showCommands(clients[i]);
 
       broadcastExcept("[Server] Client " + String(i) + " joined.", i);
       return;
