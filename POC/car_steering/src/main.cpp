@@ -30,7 +30,7 @@ bool sensors[5];
 // =================================================
 // PID SETTINGS
 // =================================================
-const float Kp = 10;
+const float Kp = 16;
 const float Ki = 0;
 const float Kd = 10;
 
@@ -149,10 +149,10 @@ float getError()
 // =================================================
 void breakCar()
 {
-    setMotor(-currentSpeed, -currentSpeed);
-    delay(50);
-    setMotor(0, 0);
-    delay(50);
+    // setMotor(-currentSpeed, -currentSpeed);
+    // delay(50);
+    // setMotor(0, 0);
+    // delay(50);
 }
 
 // =================================================
@@ -238,15 +238,45 @@ void loop()
     // Corner Detection
     // ----------------------------
 
+    // ----------------------------
+    // Corner Detection (debounced)
+    // ----------------------------
+    // Require the same corner pattern to hold for several consecutive
+    // loop cycles before committing to a turn. A single noisy/flickered
+    // sensor reading can otherwise trigger the wrong-direction turn.
+    static int leftCornerCount = 0;
+    static int rightCornerCount = 0;
+    const int cornerConfirmCount = 3; // ~3 * 15ms = 45ms of sustained detection
+
     if (sensors[0] && sensors[1])
     {
+        leftCornerCount++;
+        rightCornerCount = 0;
+    }
+    else if (sensors[3] && sensors[4])
+    {
+        rightCornerCount++;
+        leftCornerCount = 0;
+    }
+    else
+    {
+        leftCornerCount = 0;
+        rightCornerCount = 0;
+    }
+
+    if (leftCornerCount >= cornerConfirmCount)
+    {
+        leftCornerCount = 0;
+        rightCornerCount = 0;
         breakCar();
         turnLeft();
         return;
     }
 
-    if (sensors[3] && sensors[4])
+    if (rightCornerCount >= cornerConfirmCount)
     {
+        leftCornerCount = 0;
+        rightCornerCount = 0;
         breakCar();
         turnRight();
         return;
@@ -298,5 +328,5 @@ void loop()
     Serial.print(" R:");
     Serial.println(rightMotor);
 
-    delay(15);
+    delay(10);
 }
