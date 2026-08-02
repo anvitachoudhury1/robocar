@@ -1,15 +1,9 @@
 #include <Arduino.h>
 
 // =================================================
-// IR Sensor Array (Array 1) — analog pins used as digital
+// IR Sensor Array (Array 2) — analog pin + digital pins
 // S1 (left) -> S5 (right)
 // =================================================
-// #define IR_A1_S1 A0
-// #define IR_A1_S2 A1
-// #define IR_A1_S3 A2
-// #define IR_A1_S4 A3
-// #define IR_A1_S5 A4
-
 #define IR_A2_S1 A5
 #define IR_A2_S2 2
 #define IR_A2_S3 3
@@ -25,29 +19,45 @@ bool sensors[5];
 // TB6612FNG Motor Driver Pins
 // Motor A = left, Motor B = right
 // =================================================
-#define MOTOR_STBY 6  // standby -- must be HIGH to enable driver
-#define MOTOR_AIN1 7  // motor A direction pin 1
-#define MOTOR_AIN2 8  // motor A direction pin 2
-#define MOTOR_PWMA 10 // motor A speed (PWM)
-#define MOTOR_BIN1 12 // motor B direction pin 1
-#define MOTOR_BIN2 13 // motor B direction pin 2
-#define MOTOR_PWMB 11 // motor B speed (PWM)
+#define MOTOR_STBY 6
+#define MOTOR_AIN1 7
+#define MOTOR_AIN2 8
+#define MOTOR_PWMA 10
+#define MOTOR_BIN1 12
+#define MOTOR_BIN2 13
+#define MOTOR_PWMB 11
 
 // =================================================
 // PID SETTINGS
 // =================================================
-float Kp = 16;
-float Ki = 0;
-float Kd = 10;
+const float Kp = 10;
+const float Ki = 0;
+const float Kd = 10;
 
 float previousError = 0;
-float integral = 0;
+float totalError = 0;
 
 // =================================================
 // SPEED
 // =================================================
 int normalSpeed = 90;
 int slowSpeed = 60;
+
+// Tracks whatever speed the car was actually driving at, moment to
+// moment (normalSpeed or slowSpeed depending on how far off-line it
+// currently is). Turn speeds are based on THIS, not a fixed constant,
+// so a turn taken while already slowing down for a sharp curve stays
+// proportionally scaled to that slower speed, not full normalSpeed.
+int currentSpeed = 90;
+
+// Turn speeds are derived from normalSpeed (not hardcoded) so they
+// scale automatically if you change normalSpeed later.
+//   turnInnerRatio: the inner wheel during a pivot turn -- negative
+//     means it briefly reverses, for a tighter pivot.
+//   turnOuterRatio: the outer wheel -- boosted above normalSpeed so
+//     the turn completes quickly.
+const float turnInnerRatio = 0.3; // e.g. normalSpeed=90 -> 27 (slows, doesn't reverse -- wider/gentler turn)
+const float turnOuterRatio = 1.0; // e.g. normalSpeed=90 -> 90 (stays near normal, doesn't speed up)
 
 // =================================================
 // Motor Control
@@ -104,22 +114,22 @@ float getError()
 {
     readSensors();
 
-    int sum = 0;
-    int count = 0;
+    int sumOfError = 0;
+    int sensorsActiveCount = 0;
 
     for (int i = 0; i < 5; i++)
     {
         if (sensors[i])
         {
-            sum += weights[i];
-            count++;
+            sumOfError += weights[i];
+            sensorsActiveCount++;
         }
     }
 
     // Line lost
-    if (count == 0)
+    if (sensorsActiveCount == 0)
     {
-        integral = 0;
+        totalError = 0;
 
         if (previousError < 0)
             return -3;
@@ -130,7 +140,19 @@ float getError()
         return 0;
     }
 
-    return (float)sum / count;
+    return (float)sumOfError / sensorsActiveCount;
+}
+
+// =================================================
+// Brake — brief reverse pulse for a true stop, used right before
+// committing to a turn so the car doesn't carry momentum into the pivot
+// =================================================
+void breakCar()
+{
+    setMotor(-currentSpeed, -currentSpeed);
+    delay(50);
+    setMotor(0, 0);
+    delay(50);
 }
 
 // =================================================
@@ -138,7 +160,10 @@ float getError()
 // =================================================
 void turnLeft()
 {
-    setMotor(-60, 120);
+    int innerSpeed = (int)(currentSpeed * turnInnerRatio);
+    int outerSpeed = (int)(currentSpeed * turnOuterRatio);
+
+    setMotor(innerSpeed, outerSpeed);
 
     while (true)
     {
@@ -156,7 +181,10 @@ void turnLeft()
 // =================================================
 void turnRight()
 {
-    setMotor(120, -60);
+    int innerSpeed = (int)(currentSpeed * turnInnerRatio);
+    int outerSpeed = (int)(currentSpeed * turnOuterRatio);
+
+    setMotor(outerSpeed, innerSpeed);
 
     while (true)
     {
@@ -187,7 +215,7 @@ void setup()
     pinMode(MOTOR_BIN2, OUTPUT);
     pinMode(MOTOR_PWMB, OUTPUT);
 
-    digitalWrite(MOTOR_STBY, HIGH); // enable the driver -- required for TB6612FNG
+    digitalWrite(MOTOR_STBY, HIGH);
 
     Serial.println("Robot Ready");
 }
@@ -197,36 +225,29 @@ void setup()
 // =================================================
 void loop()
 {
-
-    // setMotor(100, 100);
-    // delay(100);
-    // return;
     float error = getError();
 
     for (int i = 0; i < 5; i++)
     {
-        // Serial.print(" S");
-        // Serial.print(i);
         Serial.print(" ");
         Serial.print(sensors[i]);
     }
     Serial.println("");
 
-    // return;
     // ----------------------------
     // Corner Detection
     // ----------------------------
 
-    // Left corner
     if (sensors[0] && sensors[1])
     {
+        breakCar();
         turnLeft();
         return;
     }
 
-    // Right corner
     if (sensors[3] && sensors[4])
     {
+        breakCar();
         turnRight();
         return;
     }
@@ -235,14 +256,14 @@ void loop()
     // PID
     // ----------------------------
 
-    integral += error;
-    integral = constrain(integral, -20, 20);
+    totalError += error;
+    totalError = constrain(totalError, -20, 20);
 
     float derivative = error - previousError;
 
     float correction =
         (Kp * error) +
-        (Ki * integral) +
+        (Ki * totalError) +
         (Kd * derivative);
 
     previousError = error;
@@ -253,6 +274,8 @@ void loop()
 
     if (abs(error) > 1.5)
         speed = slowSpeed;
+
+    currentSpeed = speed; // remember the speed actually being driven right now
 
     int leftMotor = speed - correction;
     int rightMotor = speed + correction;
