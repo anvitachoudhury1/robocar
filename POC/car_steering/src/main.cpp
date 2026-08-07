@@ -1,48 +1,38 @@
 #include <Arduino.h>
 
 // =================================================
-// IR Sensor Arrays — 10 sensors total (two 5-sensor arrays combined)
-// Array 1 (left half) -> Array 2 (right half), left to right overall
+// IR Sensor Array (Array 2) — analog pin + digital pins
+// S1 (left) -> S5 (right)
 // =================================================
-#define NUM_SENSORS 10
+#define IR_A2_S1 A5
+#define IR_A2_S2 A4
+#define IR_A2_S3 A3
+#define IR_A2_S4 A2
+#define IR_A2_S5 A1
 
-const uint8_t sensorPins[NUM_SENSORS] = {
-    A0, A1, A2, A3, A4, // array 1 (left)
-    A5, 2, 3, 4, 5      // array 2 (right)
-};
+const byte sensorPins[5] = {IR_A2_S1, IR_A2_S2, IR_A2_S3, IR_A2_S4, IR_A2_S5};
+const int weights[5] = {-2, -1, 0, 1, 2};
 
-// Odd, symmetric weights: no sensor sits exactly at zero, so a
-// line centered between two middle sensors still produces a clean 0.
-const int weights[NUM_SENSORS] = {-9, -7, -5, -3, -1, 1, 3, 5, 7, 9};
+bool sensors[5];
 
-// true = sensor pulls LOW when it sees the dark line
-#define LINE_IS_LOW true
-
-bool sensor[NUM_SENSORS];
-uint8_t sensorCount = 0;
-
-// ------------------------------------------------------------
-// MOTOR PINS -- PWM moved to 9 and 10 so BOTH motors share
-// Timer1. Previously PWMA was on 10 (Timer1) and PWMB on 11
-// (Timer2), which meant the two motors ran on separate timers.
-// ------------------------------------------------------------
+// =================================================
+// TB6612FNG Motor Driver Pins
+// Motor A = left, Motor B = right
+// =================================================
 #define MOTOR_STBY 6
 #define MOTOR_AIN1 7
 #define MOTOR_AIN2 8
-#define MOTOR_PWMA 9  // was 10
-#define MOTOR_PWMB 10 // was 11
-#define MOTOR_BIN1 11 // was 12
-#define MOTOR_BIN2 12 // was 13
+#define MOTOR_PWMA 10
+#define MOTOR_BIN1 12
+#define MOTOR_BIN2 13
+#define MOTOR_PWMB 11
 
 // =================================================
 // PID SETTINGS
-// NOTE: weights now range -9..9 (10 sensors) instead of -2..2 (5
-// sensors), so Kp/Kd are scaled down from the 5-sensor version.
-// Re-tune on your actual track.
 // =================================================
-const float Kp = 20;
+const float Kp = 16;
 const float Ki = 0;
-const float Kd = 3;
+const float Kd = 10;
 
 float previousError = 0;
 float totalError = 0;
@@ -52,10 +42,22 @@ float totalError = 0;
 // =================================================
 int normalSpeed = 90;
 int slowSpeed = 60;
+
+// Tracks whatever speed the car was actually driving at, moment to
+// moment (normalSpeed or slowSpeed depending on how far off-line it
+// currently is). Turn speeds are based on THIS, not a fixed constant,
+// so a turn taken while already slowing down for a sharp curve stays
+// proportionally scaled to that slower speed, not full normalSpeed.
 int currentSpeed = 90;
 
-const float turnInnerRatio = 0.1;
-const float turnOuterRatio = .8;
+// Turn speeds are derived from normalSpeed (not hardcoded) so they
+// scale automatically if you change normalSpeed later.
+//   turnInnerRatio: the inner wheel during a pivot turn -- negative
+//     means it briefly reverses, for a tighter pivot.
+//   turnOuterRatio: the outer wheel -- boosted above normalSpeed so
+//     the turn completes quickly.
+const float turnInnerRatio = 0.3; // e.g. normalSpeed=90 -> 27 (slows, doesn't reverse -- wider/gentler turn)
+const float turnOuterRatio = 1.0; // e.g. normalSpeed=90 -> 90 (stays near normal, doesn't speed up)
 
 // =================================================
 // Motor Control
@@ -99,15 +101,9 @@ void setMotor(int left, int right)
 // =================================================
 void readSensors()
 {
-    sensorCount = 0;
-    for (int i = 0; i < NUM_SENSORS; i++)
+    for (int i = 0; i < 5; i++)
     {
-        bool lineDetected = LINE_IS_LOW
-                                ? (digitalRead(sensorPins[i]) == LOW)
-                                : (digitalRead(sensorPins[i]) == HIGH);
-        sensor[i] = lineDetected;
-        if (lineDetected)
-            sensorCount++;
+        sensors[i] = (digitalRead(sensorPins[i]) == LOW);
     }
 }
 
@@ -119,34 +115,37 @@ float getError()
     readSensors();
 
     int sumOfError = 0;
+    int sensorsActiveCount = 0;
 
-    for (int i = 0; i < NUM_SENSORS; i++)
+    for (int i = 0; i < 5; i++)
     {
-        if (sensor[i])
+        if (sensors[i])
         {
             sumOfError += weights[i];
+            sensorsActiveCount++;
         }
     }
 
     // Line lost
-    if (sensorCount == 0)
+    if (sensorsActiveCount == 0)
     {
         totalError = 0;
 
         if (previousError < 0)
-            return -9;
+            return -3;
 
         if (previousError > 0)
-            return 9;
+            return 3;
 
         return 0;
     }
 
-    return (float)sumOfError / sensorCount;
+    return (float)sumOfError / sensorsActiveCount;
 }
 
 // =================================================
-// Brake
+// Brake — brief reverse pulse for a true stop, used right before
+// committing to a turn so the car doesn't carry momentum into the pivot
 // =================================================
 void breakCar()
 {
@@ -158,8 +157,6 @@ void breakCar()
 
 // =================================================
 // 90 Degree Left Turn
-// With 10 sensors, "back to centered" is checked on the two middle
-// sensors (indices 4 and 5) instead of a single center sensor.
 // =================================================
 void turnLeft()
 {
@@ -172,7 +169,7 @@ void turnLeft()
     {
         readSensors();
 
-        if (sensor[4] || sensor[5])
+        if (sensors[2])
             break;
     }
 
@@ -193,7 +190,7 @@ void turnRight()
     {
         readSensors();
 
-        if (sensor[4] || sensor[5])
+        if (sensors[2])
             break;
     }
 
@@ -207,7 +204,7 @@ void setup()
 {
     Serial.begin(115200);
 
-    for (int i = 0; i < NUM_SENSORS; i++)
+    for (int i = 0; i < 5; i++)
         pinMode(sensorPins[i], INPUT);
 
     pinMode(MOTOR_STBY, OUTPUT);
@@ -220,7 +217,7 @@ void setup()
 
     digitalWrite(MOTOR_STBY, HIGH);
 
-    Serial.println("Robot Ready (10-sensor)");
+    Serial.println("Robot Ready");
 }
 
 // =================================================
@@ -228,29 +225,30 @@ void setup()
 // =================================================
 void loop()
 {
+    // setMotor(60, 60);
+    // return;
     float error = getError();
 
-    for (int i = 0; i < NUM_SENSORS; i++)
-    {
-        Serial.print(" ");
-        Serial.print(sensor[i]);
-    }
-    Serial.println("");
+    // ----------------------------
+    // Corner Detection
+    // ----------------------------
 
     // ----------------------------
     // Corner Detection (debounced)
-    // Outermost pair on each side (indices 0/1 and 8/9)
     // ----------------------------
+    // Require the same corner pattern to hold for several consecutive
+    // loop cycles before committing to a turn. A single noisy/flickered
+    // sensor reading can otherwise trigger the wrong-direction turn.
     static int leftCornerCount = 0;
     static int rightCornerCount = 0;
-    const int cornerConfirmCount = 3;
+    const int cornerConfirmCount = 3; // ~3 * 15ms = 45ms of sustained detection
 
-    if (sensor[0] && sensor[1])
+    if (sensors[0] && sensors[1])
     {
         leftCornerCount++;
         rightCornerCount = 0;
     }
-    else if (sensor[8] && sensor[9])
+    else if (sensors[3] && sensors[4])
     {
         rightCornerCount++;
         leftCornerCount = 0;
@@ -299,10 +297,10 @@ void loop()
 
     int speed = normalSpeed;
 
-    if (abs(error) > 4)
+    if (abs(error) > 1.5)
         speed = slowSpeed;
 
-    currentSpeed = speed;
+    currentSpeed = speed; // remember the speed actually being driven right now
 
     int leftMotor = speed - correction;
     int rightMotor = speed + correction;
@@ -312,6 +310,12 @@ void loop()
     // ----------------------------
     // Debug
     // ----------------------------
+
+    for (int i = 0; i < 5; i++)
+    {
+        Serial.print(" ");
+        Serial.print(sensors[i]);
+    }
 
     Serial.print(" Error:");
     Serial.print(error);
